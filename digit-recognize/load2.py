@@ -1,7 +1,5 @@
 import struct
-
 import numpy as np
-
 
 def load_data_idx3(filename):
     bin_data = open(filename, 'rb').read()
@@ -43,14 +41,19 @@ def load_data_wrapper():
     # 60000 * 784
     train_images = load_data_idx3('data/train-images.idx3-ubyte')
     train_images = np.multiply(train_images, 0.99609375/255.0)
+    train_images = train_images[10001:]
+    validation_images = train_images[:10000]
     test_images = load_data_idx3('data/t10k-images.idx3-ubyte')
     test_images = np.multiply(test_images, 0.99609375/255.0)
     train_labels = load_data_idx1('data/train-labels.idx1-ubyte')
     test_labels = load_data_idx1('data/t10k-labels.idx1-ubyte')
-    train_labels = [ vectorized_result(l) for l in train_labels ]
+    train_labels = [vectorized_result(l) for l in train_labels]
+    train_labels = train_labels[10001:]
+    validation_labels = train_labels[:10000]
+    validation_data = zip(validation_images,validation_labels)
     train_data = zip(train_images, train_labels)
     test_data = zip(test_images, test_labels)
-    return (train_data, test_data)
+    return (train_data, validation_data, test_data)
 
 def vectorized_result(j):
     e = np.zeros((10, 1))

@@ -1,10 +1,14 @@
 import random
-import time
+from time import time
 
 import numpy as np
 import load
 import bload
 
+'''
+ CrossEntropy cost function 95.47%  cost_time: 229s eta = 0.5
+ Quadratic cost function  95.35% cost_time: 243s eta = 3.0
+'''
 class Network(object):
 
     def __init__(self, sizes):
@@ -22,13 +26,14 @@ class Network(object):
 
     def SGD(self, training_data, epochs, mini_batch_size, eta,
             test_data=None):
+        all_cost_time_start = time()
         if test_data:
             test_data = list(test_data)
             n_test = len(test_data)
         training_data = list(training_data)
         n = len(training_data)
         for j in range(epochs):
-            start = int(round(time.time() * 1000))
+            start = time()
             random.shuffle(training_data)
             mini_batches = [
                 training_data[k:k+mini_batch_size]
@@ -36,30 +41,21 @@ class Network(object):
             for mini_batch in mini_batches:
                 self.update_mini_batch(mini_batch, eta)
             if test_data:
-                print("Epoch {0}: {1} / {2}".format(
-                    j, self.evaluate(test_data), n_test))
+                print("Epoch {0}: {1} / {2}".format(j, self.evaluate(test_data), n_test))
             else:
                 print("Epoch {0} complete".format(j))
-            print("spend time for one loop:{}".format(int(round(time.time() * 1000)) - start))
+            print("spend time for one loop:{}".format(time() - start))
+        print("total_cost_time:{}".format(time()-all_cost_time_start))
 
     def update_mini_batch(self, mini_batch, eta):
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         nabla_w = [np.zeros(w.shape) for w in self.weights]
         for x, y in mini_batch:
             delta_nabla_b, delta_nabla_w = self.backprop(x, y)
-            # delta_nabla_b, delta_nabla_w = self.backprop(mini_batch[:][0], mini_batch[:][1])
             nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
             nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-        # cost function
-        self.weights = [w-(eta/len(mini_batch))*nw
-                        for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b-(eta/len(mini_batch))*nb
-                       for b, nb in zip(self.biases, nabla_b)]
-
-    # 数据批量进行反向传播
-    # def backprop(self,x,y):
-    #
-    #     pass
+        self.weights = [w - (eta/len(mini_batch)) * nw for w, nw in zip(self.weights, nabla_w)]
+        self.biases = [b - (eta/len(mini_batch)) * nb for b, nb in zip(self.biases, nabla_b)]
 
     def backprop(self, x, y):
         nabla_b = [np.zeros(b.shape) for b in self.biases]
@@ -72,7 +68,7 @@ class Network(object):
             zs.append(z)
             activation = sigmoid(z)
             activations.append(activation)
-        delta = self.cost_derivative(activations[-1], y) * sigmoid_prime(zs[-1])
+        delta = self.cost_derivative(activations[-1], y) # * sigmoid_prime(zs[-1])
         nabla_b[-1] = delta
         nabla_w[-1] = np.dot(delta, activations[-2].transpose())
         for l in range(2, self.num_layers):
@@ -89,14 +85,8 @@ class Network(object):
         return sum(int(x == y) for (x, y) in test_results)
 
     # 二次代价函数对aL求导
-    # def cost_derivative(self, output_activations, y):
-    #     return (output_activations-y)
-
-    # 交叉熵代价函数对aL求导
     def cost_derivative(self, output_activations, y):
-        m = y - output_activations
-        s = output_activations * (1 - output_activations)
-        return np.divide(m, s)
+        return (output_activations - y)
 
 def sigmoid(z):
     return 1.0/(1.0+np.exp(-z))
@@ -104,20 +94,18 @@ def sigmoid(z):
 def sigmoid_prime(z):
     return sigmoid(z)*(1-sigmoid(z))
 
-def compileNp(src,tar):
-    src = list(src)
-    tar = list(tar)
+def compileNp(x, x_c):
+    x = list(x)
+    x_c = list(x_c)
     sum = 0
-    for i in range(50000):
-        x,y = src[i]
-        x_c,y_c = tar[i]
-        if (x == x_c).all() and (y == y_c).all():
+    for i in range(10000):
+        if x[i][1].all() == x_c[i][1].all():
             sum += 1
-    print(sum)
+    print("same: {}".format(sum))
 
 if __name__ == '__main__':
     train_data,test_data = load.load_data_wrapper()
-    # train,test = bload.load_data_wrapper()
-    # compileNp(train_data,train)
-    net = Network([784,30,10])
-    net.SGD(train_data,30,10,3.0,test_data=test_data)
+    # train_data,test_data = bload.load_data_wrapper()
+    # compileNp(train, train_data)
+    net = Network([784, 30, 10])
+    net.SGD(train_data, 30, 10, 0.5, test_data=test_data)
