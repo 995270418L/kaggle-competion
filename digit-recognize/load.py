@@ -41,15 +41,17 @@ def min_max_scale(value,min,max):
 
 def load_data_wrapper():
     # 60000 * 784
-    train_images = load_data_idx3('data/train-images.idx3-ubyte')
+    train_images = load_data_idx3('data/train-images-idx3-ubyte')
     train_images = np.multiply(train_images, 0.99609375/255.0)
-    test_images = load_data_idx3('data/t10k-images.idx3-ubyte')
+    test_images = load_data_idx3('data/t10k-images-idx3-ubyte')
     test_images = np.multiply(test_images, 0.99609375/255.0)
-    train_labels = load_data_idx1('data/train-labels.idx1-ubyte')
-    test_labels = load_data_idx1('data/t10k-labels.idx1-ubyte')
+    train_labels = load_data_idx1('data/train-labels-idx1-ubyte')
+    test_labels = load_data_idx1('data/t10k-labels-idx1-ubyte')
     train_labels = [ vectorized_result(l) for l in train_labels ]
     train_data = zip(train_images, train_labels)
+    train_data = list(train_data)
     test_data = zip(test_images, test_labels)
+    test_data = list(test_data)
     return (train_data, test_data)
 
 def vectorized_result(j):
