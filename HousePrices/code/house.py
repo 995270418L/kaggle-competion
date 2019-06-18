@@ -19,6 +19,7 @@ def get_data():
 
 def get_test_data():
     data = pd.read_csv("../datasets/test.csv")
+    print("source data shape: {}".format(data.shape))
     data = pd.get_dummies(data)
     print("test data shape: {}".format(data.shape))
     return data
@@ -35,7 +36,7 @@ def train_model(X, y):
         max_depth=22,
         min_child_weight=3,
         eta=0.5,
-        n_estimators=100,
+        n_estimators=1000,
         learning_rate=0.1,
         gamma=0,
         subsample=1,
@@ -78,6 +79,6 @@ def get_result(model, test_data):
 if __name__ == '__main__':
     train_data = get_data()
     X, y = split_data(train_data)
-    model = score_model(X, y)
-    get_result(model, get_test_data())
+    model = train_model(X, y)
+    # get_result(model, get_test_data())
     # visualization(train_data)
