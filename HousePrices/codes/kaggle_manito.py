@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 –*-
 '''
 kaggle 大神代码  https://www.kaggle.com/abhinand05/predicting-housingprices-simple-approach-lb-top3
 '''
@@ -27,6 +28,7 @@ from lightgbm import LGBMRegressor
 
 # Package for stacking models
 from vecstack import stacking
+from joblib import dump, load
 
 display(HTML("""
 <style>
@@ -109,46 +111,65 @@ def corr(df):
     sns.catplot(x='SaleType', y='SalePrice', data=df, kind='bar', palette='muted')
     plt.show()
 
-def integrated_models(train_data, test_data):
-    print("train data shape:{}, test data shape:{}".format(train_data.shape, test_data.shape))
-    y = train_data['SalePrice']
-    X = train_data.drop('SalePrice', axis=1)
-
-    kf = KFold(n_splits=5)
-    # random_forest
-    random_forest = RandomForestRegressor(n_estimators=800, max_depth=15, min_samples_leaf=5, max_features=None, random_state=10, oob_score=True)
-    y_pred = cross_val_score(random_forest, X, y, cv=kf, n_jobs=5)
+def r_f_model(X, y, kf=KFold(n_splits=5)):
+    random_forest = RandomForestRegressor(n_estimators=1200, max_depth=15, min_samples_leaf=5, max_features=None,
+                                          random_state=10, oob_score=True)
+    y_pred = cross_val_score(random_forest, X, y, cv=kf, n_jobs=5, error_score='raise')
     print('random forest mean: {}'.format(y_pred.mean()))
     random_forest.fit(X, y)
-    rf_pred = random_forest.predict(test_data)
+    dump(random_forest, 'rf_model.joblib')
 
-    # xgboost predict
-    xg_boost = XGBRegressor(learning_rate=0.01, n_estimators=6000, max_depth=4, min_child_weight=1, gamma=0, subsample=1, colsample_bytree=0.2, objective='reg:squarederror',
-                 eval_metric='rmse', nthread=-1, scale_pos_weight=1, seed=20, reg_alpha=0.00006)
+def xgboost_model(X, y, kf=KFold(n_splits=5)):
+    xg_boost = XGBRegressor(learning_rate=0.01, n_estimators=6000, max_depth=4, min_child_weight=1, gamma=0,
+                            subsample=1, colsample_bytree=0.2, objective='reg:squarederror', nthread=-1, scale_pos_weight=1, seed=20, reg_alpha=0.00006)
     y_pred = cross_val_score(xg_boost, X, y, cv=kf, n_jobs=-1)
     print('xgboost mean:{}'.format(y_pred.mean()))
-    xg_boost.fit(X, y)
-    xgb_pred = xg_boost.predict(test_data)
+    xg_boost.fit(X, y, eval_metric='rmse')
+    dump(xg_boost, 'xgb_model.joblib')
 
-    # gradient boost regressor(GBM)
-    g_boost = GradientBoostingRegressor(n_estimators=6000, learning_rate=0.01, max_depth=5, max_features='sqrt', min_samples_leaf=15, min_samples_split=10, loss='ls', random_state=30)
+def gbm_model(X, y, kf=KFold(n_splits=5)):
+    g_boost = GradientBoostingRegressor(n_estimators=6000, learning_rate=0.01, max_depth=5, max_features='sqrt',
+                                        min_samples_leaf=15, min_samples_split=10, loss='ls', random_state=30)
     y_pred = cross_val_score(g_boost, X, y, cv=kf, n_jobs=-1)
     print('gbm mean:{}'.format(y_pred.mean()))
     g_boost.fit(X, y)
-    gbm_pred = g_boost.predict(test_data)
+    dump(g_boost, 'gmb_model.joblib')
 
-    # lightGBM regressor
-    lightgbm = LGBMRegressor(objective='regression', num_leaves=6,learning_rate=0.01,n_estimators=6400,verbose=-1,bagging_fraction=0.80,bagging_freq=4,bagging_seed=6,
+def lgbm_model(X, y, kf=KFold(n_splits=5)):
+    lgbm_boost = LGBMRegressor(objective='regression', num_leaves=6, learning_rate=0.01, n_estimators=6400, verbose=-1,
+                             bagging_fraction=0.80, bagging_freq=4, bagging_seed=6,
                              feature_fraction=0.2, feature_fraction_seed=7)
-    y_pred = cross_val_score(lightgbm, X, y, cv=kf, n_jobs=-1)
+    y_pred = cross_val_score(lgbm_boost, X, y, cv=kf, n_jobs=-1)
     print('lgbm mean:{}'.format(y_pred.mean()))
-    lightgbm.fit(X, y)
-    lgb_pred = lightgbm.predict(test_data)
+    lgbm_boost.fit(X, y, eval_metric='rmse')
+    dump(lgbm_boost, 'lgmb_model.joblib')
+
+def train_four_model(train_data):
+    y = np.ravel(np.array(train_data[['SalePrice']]))
+    X = train_data.drop('SalePrice', axis=1)
+    r_f_model(X, y)
+    xgboost_model(X, y)
+    gbm_model(X, y)
+    lgbm_model(X, y)
+
+def integrated_models(train_data, test_data):
+    print("train data shape:{}, test data shape:{}".format(train_data.shape, test_data.shape))
+
+    y = np.ravel(np.array(train_data[['SalePrice']]))
+    X = train_data.drop('SalePrice', axis=1)
+
+    # load four models
+    random_forest = load('rf_model.joblib')
+    lightgbm = load('lgmb_model.joblib')
+    g_boost = load('gmb_model.joblib')
+    xg_boost = load('xgb_model.joblib')
 
     # model stacking
     models = [g_boost, xg_boost, lightgbm, random_forest]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
     S_train, S_test = stacking(models, X_train, y_train, X_test, regression=True, mode='oof_pred_bag', metric=rmse, n_folds=5, random_state=25, verbose=2)
+
+    print("S_train shape:{} \t S_test shape:{}".format(S_train.shape, S_test.shape))
 
     # 初始化第二层模型
     xgb_lev2 = XGBRegressor(learning_rate=0.1, n_estimators=500, max_depth=3, n_jobs=-1, random_state=17)
@@ -161,8 +182,8 @@ def integrated_models(train_data, test_data):
     y2_pred_L1 = models[1].predict(test_data)
     y3_pred_L1 = models[2].predict(test_data)
     y4_pred_L1 = models[3].predict(test_data)
-    S_test_L1 = np.c_[rf_pred, xgb_pred, gbm_pred, lgb_pred]
-    # S_test_L1 = np.c_[y1_pred_L1, y2_pred_L1, y3_pred_L1, y4_pred_L1]
+    S_test_L1 = np.c_[y1_pred_L1, y2_pred_L1, y3_pred_L1, y4_pred_L1]
+    print("S_test_L1 shape: {}".format(S_test_L1.shape))
     test_stacked_pred = xgb_lev2.predict(S_test_L1)
     submission = pd.DataFrame()
 
@@ -176,9 +197,15 @@ def rmse(y_true, y_pred):
 
 if __name__ == '__main__':
     train_data, test_data = import_data()
+    fill_missing_data(train_data)
+    print(train_data.isnull().sum().max())
+    fill_missing_data(test_data)
+    print(test_data.isnull().sum().max())
     impute_cats(train_data)
     impute_cats(test_data)
+    # train_four_model(train_data)
     integrated_models(train_data, test_data)
+    # integrated_models(train_data, test_data)
     # corr(train_data)
 
     # print("train data shape:{}\t test data shape: {}".format(train_data.shape, test_data.shape))
