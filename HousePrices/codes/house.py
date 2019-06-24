@@ -6,6 +6,8 @@ from sklearn.linear_model import Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.preprocessing import Imputer
+import seaborn as sns
+from scipy import stats
 
 
 def split_data(data):
@@ -18,9 +20,9 @@ def split_data(data):
     return X, y, test_data
 
 def get_data():
-    train_data = pd.read_csv("../datasets/train.csv")
-    test_data = pd.read_csv("../datasets/test.csv")
-    train_data = pd.concat([train_data, test_data], axis=0, sort=True)
+    train_data = pd.read_csv("../datasets/train.csv", index_col='Id')
+    test_data = pd.read_csv("../datasets/test.csv", index_col='Id')
+    # train_data = pd.concat([train_data, test_data], axis=0, sort=True)
     return train_data
 
 def get_test_data():
@@ -322,10 +324,20 @@ def nan_imputer(data):
     imputer.fit(data)
     return imputer.transform(data)
 
+
+def explore_data_analysis(df=pd.DataFrame()):
+    quantitative = df.select_dtypes(include='object')
+    qualitative = df.select_dtypes(exclude='object')
+    print("quantitative: {}".format(quantitative.columns))
+    print("qualitative: {}".format(qualitative.columns))
+    missing = df.isnull().sum()
+
+
 if __name__ == '__main__':
     train_data = get_data()
-    X, y, data = split_data(train_data)
-    all_data_model(X, y)
+    explore_data_analysis(train_data)
+    # X, y, data = split_data(train_data)
+    # all_data_model(X, y)
     # score_model(X, y)
     # train_test_split_model(X, y)
     # train_model(X, y)

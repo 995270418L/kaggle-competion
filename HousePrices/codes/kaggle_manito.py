@@ -13,7 +13,7 @@ import seaborn as sns
 import missingno as msno  #search for missing value
 
 # Import Sci-Kit Learn
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.preprocessing import Normalizer
 from sklearn.linear_model import LinearRegression, Lasso
 from sklearn.svm import SVR
