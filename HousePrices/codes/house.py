@@ -6,9 +6,9 @@ from sklearn.linear_model import Lasso
 from sklearn.metrics import r2_score
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.preprocessing import Imputer
-import seaborn as sns
 from scipy import stats
-
+import seaborn as sns
+import numpy as np
 
 def split_data(data):
     y = data['SalePrice']
@@ -324,14 +324,63 @@ def nan_imputer(data):
     imputer.fit(data)
     return imputer.transform(data)
 
-
 def explore_data_analysis(df=pd.DataFrame()):
-    quantitative = df.select_dtypes(include='object')
-    qualitative = df.select_dtypes(exclude='object')
-    print("quantitative: {}".format(quantitative.columns))
-    print("qualitative: {}".format(qualitative.columns))
-    missing = df.isnull().sum()
+    qualitative = df.select_dtypes(include='object')
+    quantitative = df.select_dtypes(exclude='object')
+    # normality_test using shapiro_wilk test
+    normality_test = lambda x: stats.shapiro(x.fillna(0))[1] < 0.01  # p_value 小于 0.01. 认为假设不成立，即不属于正态分布
+    normal = quantitative.apply(normality_test)
+    # print(normal.any()) # True 表示所有特征都不服从正态分布
+    # 相关性 检测
+    qual_encoded = []
+    for q in qualitative.columns:
+        encode(q, train_data)
+        qual_encoded.append(q + "_E")
+    features = list(quantitative.columns) + qual_encoded
+    # print("features :{}".format(features))
+    # spearman(features, train_data)
+    plt.figure(1)
+    corr = train_data[list(quantitative.columns) + ['SalePrice']].corr()
+    sns.heatmap(corr, vmax=.8)
+    plt.figure(2)
+    corr = train_data[qual_encoded + ['SalePrice']].corr()
+    sns.heatmap(corr, vmax=.8)
+    plt.figure(3)
+    corr = pd.DataFrame(np.zeros([len(quantitative.columns) + 1, len(qual_encoded) + 1]), index=list(quantitative.columns) + ['SalePrice'], columns=qual_encoded + ['SalePrice'])
+    for q1 in list(quantitative.columns) + ['SalePrice']:
+        for q2 in qual_encoded + ['SalePrice']:
+            corr.loc[q1, q2] = train_data[q1].corr(train_data[q2])
+    sns.heatmap(corr)
+    plt.show()
 
+def encode(feature, df=pd.DataFrame()):
+    ordering = pd.DataFrame()
+    ordering['val'] = df[feature].unique()  # values unique
+    ordering.index = ordering.val
+    ordering['spmean'] = df[[feature, 'SalePrice']].groupby(feature).mean()['SalePrice']  # 按 feature 统计对应 SalePrice 的平均值
+    ordering = ordering.sort_values('spmean')
+    ordering['ordering'] = range(1, ordering.shape[0] + 1)
+    ordering = ordering['ordering'].to_dict()
+    # 替换所有的 feature 的值
+    for key, value in ordering.items():
+        df.loc[df[feature] == key, feature + "_E"] = value
+
+def spearman(features, df=pd.DataFrame()):
+    spr = pd.DataFrame()
+    spr['feature'] = features
+    spr['spearman'] = [df[f].corr(df['SalePrice'], 'spearman') for f in features]
+    spr = spr.sort_values('spearman')
+    plt.figure(figsize=(6, 0.25*len(features)))
+    sns.barplot(data=spr, y='feature', x='spearman', orient='h')
+    plt.show()
+
+def feature_selection(df=pd.DataFrame()):
+    corr_mat = df.corr()
+    sns.heatmap(corr_mat, vmax=.8, square=True)
+    corr_mat.nla
+    print(corr_mat.inde)
+    plt.show()
+    #
 
 if __name__ == '__main__':
     train_data = get_data()
