@@ -342,6 +342,9 @@ def nan_imputer(data):
     imputer.fit(data)
     return imputer.transform(data)
 
+'''
+TOP 1% 的代码也是混合别人的结果提升的，也挺垃圾的
+'''
 def explore_data_analysis(df=pd.DataFrame()):
     qualitative = df.select_dtypes(include='object')
     quantitative = df.select_dtypes(exclude='object')
@@ -481,10 +484,10 @@ def rmlse(y, y_pred):
     return np.sqrt(mean_squared_error(y, y_pred))
 
 def cv_rmse(model, X, y, kfolds):
-    return np.sqrt(-cross_val_score(model, X, y, scoring="neg_mean_squared_error", cv=kfolds))
+    return np.sqrt(-cross_val_score(model, X, y, scoring="neg_mean_squared_error", cv=kfolds, n_jobs=-1))
 
 def model_selection(X, y, test):
-    kfolds = KFold(n_splits=10, shuffle=True, random_state=0)
+    kfolds = KFold(n_splits=10, random_state=42)
     alphas_alt = [14.5, 14.6, 14.7, 14.8, 14.9, 15, 15.1, 15.2, 15.3, 15.4, 15.5]
     alphas2 = [5e-05, 0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008]
     e_alphas = [0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007]
@@ -495,13 +498,13 @@ def model_selection(X, y, test):
     svr = make_pipeline(RobustScaler(), SVR(C=20, epsilon=0.008, gamma=0.0003, ))
     gbr = GradientBoostingRegressor(n_estimators=5000, max_depth=4, learning_rate=0.05, max_features='sqrt', min_samples_leaf=15, min_samples_split=10, loss='huber', random_state=42)
     lightgbm = LGBMRegressor(objective='regression', num_leaves=4, learning_rate=0.01, n_estimators=5000, max_bin=200, bagging_fraction=0.75,
-                             bagging_freq=5, bagging_seed=7, feature_fraction=0.2, feature_fraction_seed=7, verbose=-1)
+                             bagging_freq=5, bagging_seed=7, feature_fraction=0.2, feature_fraction_seed=7, verbose=-1, n_jobs=-1)
     xgboost = XGBRegressor(learning_rate=0.01, n_estimators=3460, max_depth=3, min_child_weight=0, gamma=0, subsample=0.7,colsample_bytree=0.7,
-                           objective='reg:linear', nthread=-1, scale_pos_weight=1, seed=27, reg_alpha=0.00006)
-    stack_gen = StackingCVRegressor(regressors=(ridge, lasso, elastic_net, gbr, xgboost, lightgbm), meta_regressor=xgboost, use_features_in_secondary=True)
+                           objective='reg:squarederror', nthread=-1, scale_pos_weight=1, seed=27, reg_alpha=0.00006, n_jobs=-1)
+    stack_gen = StackingCVRegressor(regressors=(ridge, lasso, elastic_net, gbr, xgboost, lightgbm), meta_regressor=xgboost, use_features_in_secondary=True, n_jobs=-1)
 
     score = cv_rmse(ridge, X, y, kfolds)
-    print("RIDGE: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    print("RIDGE: {:.4f} ({:.4f})\n".format( score.mean(), score.std()), datetime.now())
     score = cv_rmse(lasso, X, y, kfolds)
     print("LASSO: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
 
@@ -541,17 +544,26 @@ def model_selection(X, y, test):
     print('lightgbm')
     lgb_model_full_data = lightgbm.fit(X, y)
 
+    def blend_model_predict(X_tmp):
+        return 0.1 * elastic_net_model.predict(X_tmp) + 0.05 * lasso_model.predict(X_tmp) + 0.1 * ridge_model.predict(X_tmp) + \
+               0.1 * svr_model.predict(X_tmp) + 0.1 * gbr_model_full_data.predict(X_tmp) + 0.15 * xgb_model_full_data.predict(X_tmp) + \
+               0.1 * lgb_model_full_data.predict(X_tmp) + 0.3 * stack_gen_model.predict(np.array(X_tmp))
+    print("RMSLE score on train data: {}".format(rmlse(y, blend_model_predict(X))))
+    print("Predict submission")
+    submission = pd.read_csv("../datasets/sample_submission.csv")
+    print("test data head:{}".format(test.head()))
+    submission.loc[:, 1] = blend_model_predict(test)
+    submission.to_csv("submission.csv")
+
+def blending_result():
+    train_submission = pd.read_csv("submission.csv", index_col='Id')
+    other_best_submission = pd.read_csv("../datasets/best_submission.csv", index_col='Id')
+    result = np.floor(train_submission * 0.3 + 0.7 * other_best_submission)
+    result.to_csv("result_submission.csv")
+
 
 if __name__ == '__main__':
     train_data, test_data = get_data()
     X, y, test = feature_selection(train_data, test_data)
     model_selection(X, y, test)
-    # explore_data_analysis(train_data)
-    # X, y, data = split_data(train_data)
-    # all_data_model(X, y)
-    # score_model(X, y)
-    # train_test_split_model(X, y)
-    # train_model(X, y)
-    # train_save_model()
-    # get_result()
-    # visualization(train_data)
+    # blending_result()
