@@ -14,7 +14,7 @@ from sklearn.preprocessing import Imputer, StandardScaler, RobustScaler  # 数�
 from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import make_pipeline
 from sklearn.svm import SVR  # SVM 的重要分支，回归算法的一种
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 from mlxtend.regressor import StackingCVRegressor  # 集成学习
@@ -22,7 +22,7 @@ from mlxtend.regressor import StackingCVRegressor  # 集成学习
 from scipy import stats
 from scipy.stats import skew, boxcox_normmax
 from scipy.special import boxcox1p # box-cox 转换, 将数据尽量转换为正态分布的数据
-
+from joblib import dump, load
 import seaborn as sns
 import numpy as np
 
@@ -58,17 +58,45 @@ def model_selection(X, y, test):
     model_test(X, y, kfolds)
 
 def model_test(X, y, kfolds):
-    X = RobustScaler().fit_transform(X)
-    #ridge 训练
-    alphas_alt = [14.5, 14.6, 14.7, 14.8, 14.9, 15, 15.1, 15.2, 15.3, 15.4, 15.5]
-    ridge = RidgeCV(alphas=alphas_alt, cv=kfolds, fit_intercept=True, normalize=False, scoring="neg_mean_squared_error", store_cv_values=False)
-    ridge.fit(X, y)
-    print("best ridge param :{}".format(ridge.alpha_))
-    # lasso 训练
-    alphas = [0.9, 1, 2, 3, 4, 5, 6, 10]
-    lasso = LassoCV(alphas, cv=kfolds, n_jobs=-1, random_state=50, max_iter=10000)
-    print(lasso.alphas_)
+    R_X = RobustScaler().fit_transform(X)
+    # ridge 训练
+    # ridge = RidgeCV(cv=kfolds)
+    # ridge.fit(R_X, y)
+    # dump(ridge, '../models/ridgecv.joblib')
+    # print("best ridge param :{}".format(ridge.alpha_))
 
+    # print("X head:{} \n################\n y head :{}".format(X.head(), y.head()))
+    # lasso 训练
+    # lassocv = LassoCV(cv=kfolds, n_jobs=-1, random_state=50)
+    # lassocv.fit(R_X, y)
+    # dump(lassocv, '../models/lassocv.joblib')
+    # print(lassocv.alpha_)
+
+    # Elastic Net CV
+    # elastic_net_cv = ElasticNetCV(cv=kfolds, n_jobs=-1, random_state=50)
+    # elastic_net_cv.fit(R_X, y)
+    # dump(elastic_net_cv, '../models/elastic_net_cv.joblib')
+    # print(elastic_net_cv.alpha_)
+
+    '''
+    ensemble 算法调优，使用 GridSearch 
+    '''
+    # 随机森林
+    params = {
+        "n_estimators": [3000, 5000, 6000],
+        "max_depth": [4, 6, 8],
+    }
+    rfr = RandomForestRegressor(
+        random_state=50,
+        n_jobs=-1
+    )
+    gsc = GridSearchCV(param_grid=params, estimator=rfr, scoring='neg_mean_squared_error', cv=kfolds, n_jobs=5)
+    gsc.fit(R_X, y)
+    print("rfr model score :{}, \nbest params: {}\n".format(gsc.best_score_, gsc.best_params_))
+
+
+def cv_rmse(model, X, y, cv):
+    return np.sqrt(-cross_val_score(model, X, y, cv=cv, scoring='neg_mean_squared_error'))
 
 def explor_numeric_data(df=pd.DataFrame()):
     pass
@@ -84,10 +112,8 @@ if __name__ == '__main__':
     new_data = pd.get_dummies(data)
     X = new_data.iloc[:train_len, :]
     y = salePrice.iloc[:train_len]
+    y = y.apply(lambda x: np.log1p(x))
     test = new_data.iloc[train_len:, :]
     print('X shape {}, y shape {} test shape{}'.format(X.shape, y.shape, test.shape))
+    # print('X head: {}, \n########################\ny head: {} \n########################\n test head:{}'.format(X.head, y.head, test.head))
     model_selection(X, y, test)
-    # print('X null sum:{}\t test numm sum: {}'.format(X.isnull().sum(), test.isnull.sum()))
-    # print("X: {}".format(X.isnull().sum()))
-    # print("test: {}".format(test.isnull().sum()))
-    # test_null_data = null_data_print(test_data)
