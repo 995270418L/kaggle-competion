@@ -1,19 +1,30 @@
+from datetime import datetime
+
 import math
 import matplotlib.pyplot as plt
 import pandas as pd
 import xgboost as xgb
-from scipy.stats import skew
+
 from sklearn.cluster import KMeans
 from sklearn.feature_selection import SelectFromModel
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, LassoCV, RidgeCV, ElasticNetCV  # ElasticNet regression 其中的 penalty 函数是 L1 + L2 ，也就是 Lasso 和Ridge 的 penalty 之和
 from sklearn.metrics import r2_score
-from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn.preprocessing import Imputer
+from sklearn.model_selection import GridSearchCV, train_test_split, KFold, cross_val_score
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler  # 数据预处理的标准化，(X - mean) / std 数据聚集在0 附近， 均值为1
+from sklearn.preprocessing import Imputer, StandardScaler, RobustScaler  # 数据预处理的标准化，(X - mean) / std 数据聚集在0 附近， 均值为1
+from sklearn.metrics import mean_squared_error
+from sklearn.pipeline import make_pipeline
+from sklearn.svm import SVR  # SVM 的重要分支，回归算法的一种
+from sklearn.ensemble import GradientBoostingRegressor
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
+from mlxtend.regressor import StackingCVRegressor  # 集成学习
 
 from scipy import stats
+from scipy.stats import skew, boxcox_normmax
+from scipy.special import boxcox1p # box-cox 转换, 将数据尽量转换为正态分布的数据
+
 import seaborn as sns
 import numpy as np
 
@@ -341,7 +352,6 @@ def explore_data_analysis(df=pd.DataFrame()):
 
     # 相关性 检测
     features = spearn_corrlation(list(quantitative.columns), list(qualitative.columns), train_data)
-    print("features :{}".format(features))
     # 降维数据并可视化， 查看聚类
     # dimension_reduce_visualization(features, train_data)
 
@@ -395,7 +405,6 @@ def spearman(features, df=pd.DataFrame()):
 
 def feature_selection(train=pd.DataFrame(), test=pd.DataFrame()):
     explore_data_analysis(train)
-    print("train data shape :{}".format(train.shape))
     train = train[train['GrLivArea'] < 4500]
     train['SalePrice'] = train['SalePrice'].map(lambda x : math.log(1+x))
     y = train['SalePrice']
@@ -412,38 +421,131 @@ def feature_selection(train=pd.DataFrame(), test=pd.DataFrame()):
     features['Exterior1st'] = features['Exterior1st'].fillna(features['Exterior1st'].mode()[0])
     features['Exterior2nd'] = features['Exterior2nd'].fillna(features['Exterior2nd'].mode()[0])
     features['SaleType'] = features['SaleType'].fillna(features['SaleType'].mode()[0])
-
     for col in ('GarageYrBlt', 'GarageArea', 'GarageCars'):
         features[col] = features[col].fillna(0)
-
     for col in ['GarageType', 'GarageFinish', 'GarageQual', 'GarageCond']:
         features[col] = features[col].fillna('None')
-
     for col in ('BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1', 'BsmtFinType2'):
         features[col] = features[col].fillna('None')
-
     features['MSZoning'] = features.groupby('MSSubClass')['MSZoning'].transform(lambda x: x.fillna(x.mode()[0]))  # 填充出现频率最高的数(众数)
-
     object = list(features.select_dtypes(include='object').columns)
-    features[object].fillna('None', inplace=True)
+    features.update(features[object].fillna('None'))
     features['LotFrontage'] = features.groupby('Neighborhood')['LotFrontage'].transform(lambda x:x.fillna(x.median())) # 填充中位数
     numeric_dtypes = list(features.select_dtypes(include=['int16', 'int32', 'int64', 'float16', 'float32', 'float64']).columns)
-    features[numeric_dtypes].fillna('None', inplace=True)
+    features.update(features[numeric_dtypes].fillna(0))
 
     # 统计所有偏度 > 0.5 的features
     skew_features = features[numeric_dtypes].apply(lambda x: skew(x)).sort_values(ascending=False) # 默认是从小到大排序， 这里不进行排序，节约时间
 
     high_skew = skew_features[skew_features > 0.5]
     skew_high_index = high_skew.index
-    print("high skew index: {}".format(skew_high_index))
     for i in skew_high_index:
-        pass
-    # print(features.shape)
-    print(features.head())
+        # 对偏度大于0.5的列进行box-cox 正态化矫正
+        features[i] = boxcox1p(features[i], boxcox_normmax(features[i] + 1))
+    features = features.drop(['Utilities', 'Street', 'PoolQC'], axis=1)
+    features['YrBltAndRemod'] = features['YearBuilt'] + features['YearRemodAdd']
+    features['TotalSF'] = features['TotalBsmtSF'] + features['1stFlrSF'] + features['2ndFlrSF']
+
+    features['Total_sqr_footage'] = (features['BsmtFinSF1'] + features['BsmtFinSF2'] +
+                                     features['1stFlrSF'] + features['2ndFlrSF'])
+
+    features['Total_Bathrooms'] = (features['FullBath'] + (0.5 * features['HalfBath']) +
+                                   features['BsmtFullBath'] + (0.5 * features['BsmtHalfBath']))
+
+    features['Total_porch_sf'] = (features['OpenPorchSF'] + features['3SsnPorch'] +
+                                  features['EnclosedPorch'] + features['ScreenPorch'] +
+                                  features['WoodDeckSF'])
+    features['haspool'] = features['PoolArea'].apply(lambda x: 1 if x > 0 else 0)
+    features['has2ndfloor'] = features['2ndFlrSF'].apply(lambda x: 1 if x > 0 else 0)
+    features['hasgarage'] = features['GarageArea'].apply(lambda x: 1 if x > 0 else 0)
+    features['hasbsmt'] = features['TotalBsmtSF'].apply(lambda x: 1 if x > 0 else 0)
+    features['hasfireplace'] = features['Fireplaces'].apply(lambda x: 1 if x > 0 else 0)
+    # 对所有变量进行扩充处理
+    final_features = pd.get_dummies(features)
+    # 分离X_train, Y_train, X_test
+    X = final_features.iloc[:len(y), :]
+    test = final_features.iloc[len(y):, :]
+    # print("X shape:{}\t y shape:{}\t test shape:{}".format(X.shape, y.shape, test.shape))
+    overfit = []
+    for i in X.columns:
+        counts = X[i].value_counts()
+        zeros = counts.iloc[0]  # 获取 i 列中的众数
+        if zeros / len(X[i]) * 100 > 99.94:
+            overfit.append(i) # 占比超过 99.94 数据容易过拟合
+    X = X.drop(overfit, axis=1)
+    test = test.drop(overfit, axis=1)
+    print("X shape:{}\t y shape:{}\t test shape:{}".format(X.shape, y.shape, test.shape))
+    return X, y, test
+
+def rmlse(y, y_pred):
+    return np.sqrt(mean_squared_error(y, y_pred))
+
+def cv_rmse(model, X, y, kfolds):
+    return np.sqrt(-cross_val_score(model, X, y, scoring="neg_mean_squared_error", cv=kfolds))
+
+def model_selection(X, y, test):
+    kfolds = KFold(n_splits=10, shuffle=True, random_state=0)
+    alphas_alt = [14.5, 14.6, 14.7, 14.8, 14.9, 15, 15.1, 15.2, 15.3, 15.4, 15.5]
+    alphas2 = [5e-05, 0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007, 0.0008]
+    e_alphas = [0.0001, 0.0002, 0.0003, 0.0004, 0.0005, 0.0006, 0.0007]
+    e_l1ratio = [0.8, 0.85, 0.9, 0.95, 0.99, 1]
+    ridge = make_pipeline(RobustScaler(), RidgeCV(alphas_alt, cv=kfolds))
+    lasso = make_pipeline(RobustScaler(), LassoCV(max_iter=1e7, alphas=alphas2, random_state=42, cv=kfolds))
+    elastic_net = make_pipeline(RobustScaler(), ElasticNetCV(max_iter=1e7, alphas=e_alphas, cv=kfolds, l1_ratio=e_l1ratio))
+    svr = make_pipeline(RobustScaler(), SVR(C=20, epsilon=0.008, gamma=0.0003, ))
+    gbr = GradientBoostingRegressor(n_estimators=5000, max_depth=4, learning_rate=0.05, max_features='sqrt', min_samples_leaf=15, min_samples_split=10, loss='huber', random_state=42)
+    lightgbm = LGBMRegressor(objective='regression', num_leaves=4, learning_rate=0.01, n_estimators=5000, max_bin=200, bagging_fraction=0.75,
+                             bagging_freq=5, bagging_seed=7, feature_fraction=0.2, feature_fraction_seed=7, verbose=-1)
+    xgboost = XGBRegressor(learning_rate=0.01, n_estimators=3460, max_depth=3, min_child_weight=0, gamma=0, subsample=0.7,colsample_bytree=0.7,
+                           objective='reg:linear', nthread=-1, scale_pos_weight=1, seed=27, reg_alpha=0.00006)
+    stack_gen = StackingCVRegressor(regressors=(ridge, lasso, elastic_net, gbr, xgboost, lightgbm), meta_regressor=xgboost, use_features_in_secondary=True)
+
+    score = cv_rmse(ridge, X, y, kfolds)
+    print("RIDGE: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    score = cv_rmse(lasso, X, y, kfolds)
+    print("LASSO: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+
+    score = cv_rmse(elastic_net, X, y, kfolds)
+    print("ELASTIC_NET: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    score = cv_rmse(svr, X, y, kfolds)
+    print("SVR: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    score = cv_rmse(lightgbm, X, y, kfolds)
+    print("LIGHTGBM: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    score = cv_rmse(gbr, X, y, kfolds)
+    print("GBR: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+    score = cv_rmse(xgboost, X, y, kfolds)
+    print("XGBOOST: {:.4f} ({:.4f})\n".format(score.mean(), score.std()), datetime.now())
+
+    print("######### START FIT #############")
+    print("stack_gen")
+    stack_gen_model = stack_gen.fit(np.array(X), np.array(y))
+
+    print("elasticnet")
+    elastic_net_model = elastic_net.fit(X, y)
+
+    print("lasso")
+    lasso_model = lasso.fit(X, y)
+
+    print("ridge")
+    ridge_model = ridge.fit(X, y)
+
+    print("Svr")
+    svr_model = svr.fit(X, y)
+
+    print('GradientBoosting')
+    gbr_model_full_data = gbr.fit(X, y)
+
+    print('xgboost')
+    xgb_model_full_data = xgboost.fit(X, y)
+
+    print('lightgbm')
+    lgb_model_full_data = lightgbm.fit(X, y)
+
 
 if __name__ == '__main__':
     train_data, test_data = get_data()
-    feature_selection(train_data, test_data)
+    X, y, test = feature_selection(train_data, test_data)
+    model_selection(X, y, test)
     # explore_data_analysis(train_data)
     # X, y, data = split_data(train_data)
     # all_data_model(X, y)
