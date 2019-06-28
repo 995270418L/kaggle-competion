@@ -5,7 +5,7 @@ import xgboost as xgb
 
 from sklearn.cluster import KMeans
 from sklearn.feature_selection import SelectFromModel
-from sklearn.linear_model import Lasso, LassoCV, RidgeCV, ElasticNetCV  # ElasticNet regression 其中的 penalty 函数是 L1 + L2 ，也就是 Lasso 和Ridge 的 penalty 之和
+from sklearn.linear_model import Lasso, LassoCV, Ridge, RidgeCV, ElasticNetCV  # ElasticNet regression 其中的 penalty 函数是 L1 + L2 ，也就是 Lasso 和Ridge 的 penalty 之和
 from sklearn.metrics import r2_score
 from sklearn.model_selection import GridSearchCV, train_test_split, KFold, cross_val_score
 from sklearn.manifold import TSNE
@@ -15,7 +15,9 @@ from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import make_pipeline
 from sklearn.svm import SVR  # SVM 的重要分支，回归算法的一种
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from xgboost import XGBRegressor
+
+from xgboost import XGBRegressor, XGBRFRegressor
+
 from lightgbm import LGBMRegressor
 from mlxtend.regressor import StackingCVRegressor  # 集成学习
 
@@ -60,11 +62,13 @@ def model_selection(X, y, test):
 def model_test(X, y, kfolds):
     R_X = RobustScaler().fit_transform(X)
     # ridge 训练
-    # ridge = RidgeCV(cv=kfolds)
-    # ridge.fit(R_X, y)
+    ridge = RidgeCV(cv=kfolds)
+    ridge.fit(R_X, y)
     # dump(ridge, '../models/ridgecv.joblib')
-    # print("best ridge param :{}".format(ridge.alpha_))
-
+    print("best ridge param :{}".format(ridge.alpha_))
+    ridge_no_cv = Ridge(alpha=ridge.alpha_)
+    ridge_no_cv.fit(R_X, y)
+    dump(ridge_no_cv, '../models/ridge.joblib')
     # print("X head:{} \n################\n y head :{}".format(X.head(), y.head()))
     # lasso 训练
     # lassocv = LassoCV(cv=kfolds, n_jobs=-1, random_state=50)
@@ -83,17 +87,71 @@ def model_test(X, y, kfolds):
     '''
     # 随机森林
     params = {
-        "n_estimators": [3000, 5000, 6000],
-        "max_depth": [4, 6, 8],
+        "n_estimators": [900],
+        "max_depth": [2]
     }
-    rfr = RandomForestRegressor(
-        random_state=50,
-        n_jobs=-1
-    )
-    gsc = GridSearchCV(param_grid=params, estimator=rfr, scoring='neg_mean_squared_error', cv=kfolds, n_jobs=5)
-    gsc.fit(R_X, y)
-    print("rfr model score :{}, \nbest params: {}\n".format(gsc.best_score_, gsc.best_params_))
+    # rfr = XGBRFRegressor(
+    #     n_estimators=100,
+    #     random_state=50,
+    #     n_jobs=-1,
+    #     objective='reg:squarederror',
+    #     learning_rate=1
+    # )
+    # xgboost = XGBRegressor(
+    #     learning_rate=0.01,
+    #     objective='reg:squarederror',
+    #     n_jobs=-1,
+    #     random_state=50,
+    #     n_estimators=3000,
+    #     max_depth=4
+    # )
+    # xgboost.fit(X, y)
+    # dump(xgboost, '../models/xgboost.joblib')
+    # lgdm = LGBMRegressor(
+    #     n_estimators=500,
+    #     max_depth=4,
+    #     learning_rate=0.01,
+    #     num_leaves=14,
+    #     objective='regression'
+    # )
+    # lgdm.fit(X, y)
+    # gbr = GradientBoostingRegressor(
+    #     max_depth=2,
+    #     n_estimators=900,
+    #     learning_rate=0.1,
+    #     random_state=50,
+    #     loss='huber',  # 数据噪音多使用huber，少就使用ls
+    #     alpha=0.1,
+    #     max_features='auto'
+    # )
+    # gsc = GridSearchCV(param_grid=params, estimator=gbr, scoring='neg_mean_squared_error', cv=kfolds, n_jobs=5)
+    # gsc.fit(X, y)
+    # print("rfr model score :{}, \nbest params: {}\n".format(np.sqrt(-gsc.best_score_), gsc.best_params_))\
 
+
+def stack_model(X, y, test):
+    elastic = load("../models/elastic_net_cv.joblib")
+    gbr = load("../models/gbr.joblib")
+    lasso = load("../models/lassocv.joblib")
+    lgdm = load("../models/lgdm.joblib")
+    ridge = load("../models/ridge.joblib")
+    xgboost = load("../models/xgboost.joblib")
+    stack_gen = StackingCVRegressor(regressors=(ridge, lasso, elastic, gbr, xgboost, lgdm),
+                                    meta_regressor=xgboost, use_features_in_secondary=True, n_jobs=-1)
+    stack_gen.fit(np.array(X), np.array(y))
+    dump(stack_gen, '../models/result.joblib')
+
+def canculate_result(test):
+    stack_gen = load('../models/result.joblib')
+    data = stack_gen.predict(np.array(test))
+    sample_submission = pd.read_csv('../datasets/sample_submission.csv', index_col='Id')
+    data = np.expm1(data)
+    print("data shape :{}".format(data.shape))
+    sample_submission.iloc[:, 0] = data
+    sample_submission.to_csv('../datasets/result.csv')
+
+def rmlse(y, y_pred):
+    return np.sqrt(mean_squared_error(y, y_pred))
 
 def cv_rmse(model, X, y, cv):
     return np.sqrt(-cross_val_score(model, X, y, cv=cv, scoring='neg_mean_squared_error'))
@@ -108,7 +166,6 @@ if __name__ == '__main__':
     salePrice = data.loc[:, 'SalePrice']
     data = data.drop('SalePrice', axis=1)
     fill_null_data(data)
-    null_data_print(data)
     new_data = pd.get_dummies(data)
     X = new_data.iloc[:train_len, :]
     y = salePrice.iloc[:train_len]
@@ -116,4 +173,6 @@ if __name__ == '__main__':
     test = new_data.iloc[train_len:, :]
     print('X shape {}, y shape {} test shape{}'.format(X.shape, y.shape, test.shape))
     # print('X head: {}, \n########################\ny head: {} \n########################\n test head:{}'.format(X.head, y.head, test.head))
-    model_selection(X, y, test)
+    # model_selection(X, y, test)
+    # stack_model(X, y, test)
+    canculate_result(test)
